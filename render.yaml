@@ -1,0 +1,9 @@
+# Render blueprint: one public web service serving the API and the dashboard.
+services:
+  - type: web
+    name: mini-nms
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt   # no-op: stdlib only, but expected
+    startCommand: python api.py                     # listens on $PORT, which Render sets
+    healthCheckPath: /api/health

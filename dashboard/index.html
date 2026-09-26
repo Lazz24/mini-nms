@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini-NMS — Network Operations</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c232c;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --muted: #8b949e;
+    --green: #3fb950;
+    --red: #f85149;
+    --amber: #d29922;
+    --blue: #58a6ff;
+    --purple: #a371f7;
+    --orange: #f0883e;
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 var(--sans); }
+  body { min-height: 100vh; }
+  code, pre, .mono { font-family: var(--mono); }
+  .muted { color: var(--muted); }
+
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px;
+    padding: 14px 24px; border-bottom: 1px solid var(--border); background: var(--panel);
+  }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: .2px; }
+  header h1 .accent { color: var(--blue); font-family: var(--mono); }
+  #health { display: inline-flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 13px; }
+  .sim-note { margin-left: auto; font-size: 12px; color: var(--muted); font-family: var(--mono); }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.up { background: var(--green); box-shadow: 0 0 6px rgba(63,185,80,.7); }
+  .dot.down { background: var(--red); box-shadow: 0 0 6px rgba(248,81,73,.7); }
+  .dot.flap { background: var(--amber); box-shadow: 0 0 6px rgba(210,153,34,.7); }
+
+  .banner {
+    background: rgba(248,81,73,.15); border-bottom: 1px solid var(--red); color: #ffb3ad;
+    padding: 10px 24px; font-weight: 600;
+  }
+  .banner[hidden] { display: none; }
+
+  main { max-width: 1500px; margin: 0 auto; padding: 20px 24px 48px; display: grid; gap: 20px; }
+  .grid-top { display: grid; gap: 20px; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+  @media (max-width: 1100px) { .grid-top { grid-template-columns: minmax(0, 1fr); } }
+
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+  .panel > .ph {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+  }
+  .panel > .ph h2 { margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+  .panel > .ph .right { margin-left: auto; font-size: 12px; color: var(--muted); font-family: var(--mono); }
+  .panel > .pb { padding: 16px; }
+  .panel.hero { border-color: var(--blue); box-shadow: 0 0 0 1px rgba(88,166,255,.25); }
+  .panel.hero > .ph h2 { color: var(--blue); font-size: 14px; }
+
+  button {
+    font: inherit; color: var(--text); background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 12px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--muted); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: #1f6feb; border-color: #388bfd; color: #fff; font-weight: 600; }
+  button.primary:hover:not(:disabled) { background: #388bfd; }
+  button.danger { border-color: rgba(248,81,73,.6); color: #ffb3ad; }
+  button.danger:hover:not(:disabled) { background: rgba(248,81,73,.15); border-color: var(--red); }
+  input[type=text] {
+    font: 14px var(--mono); color: var(--text); background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 10px; width: 100%;
+  }
+  input[type=text]:focus { outline: none; border-color: var(--blue); }
+
+  /* Topology */
+  .topo-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 290px; }
+  @media (max-width: 800px) { .topo-wrap { grid-template-columns: minmax(0, 1fr); } }
+  #topoSvg { width: 100%; height: auto; display: block; background:
+      radial-gradient(circle at 1px 1px, #21262d 1px, transparent 0) 0 0 / 22px 22px; }
+  .node { cursor: pointer; }
+  .node rect.box { fill: var(--panel-2); stroke-width: 2; transition: fill .15s; }
+  .node:hover rect.box { fill: #232c37; }
+  .node.sel rect.box { fill: #26313e; stroke-width: 3.5; }
+  .node text { fill: var(--text); pointer-events: none; }
+  .node .host { font: 700 15px var(--mono); }
+  .node .role { font: 11px var(--sans); fill: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
+  .lnk { stroke: #4b5563; stroke-width: 2.5; fill: none; }
+  .lnk.down { stroke: var(--red); }
+  .lnk.flap { stroke: var(--amber); stroke-dasharray: 6 4; }
+  .lnk-label { font: 10.5px var(--mono); fill: var(--muted); paint-order: stroke; stroke: var(--panel); stroke-width: 4px; text-anchor: middle; }
+  .ovl { stroke: var(--red); stroke-width: 3; stroke-dasharray: 9 6; fill: none; }
+  .ovl-label { font: 700 11.5px var(--mono); fill: var(--red); paint-order: stroke; stroke: var(--panel); stroke-width: 4px; text-anchor: middle; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; padding: 8px 16px 14px; font-size: 12px; color: var(--muted); }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .detail { border-left: 1px solid var(--border); padding: 14px 16px; overflow: auto; max-height: 470px; }
+  @media (max-width: 800px) { .detail { border-left: 0; border-top: 1px solid var(--border); } }
+  .detail h3 { margin: 0 0 2px; font: 700 15px var(--mono); }
+  .detail .sub { color: var(--muted); font-size: 12px; margin-bottom: 10px; text-transform: uppercase; letter-spacing: .6px; }
+  .if { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; background: var(--bg); }
+  .if .n { font: 600 12.5px var(--mono); display: flex; gap: 8px; align-items: center; }
+  .if .d { color: var(--muted); font-size: 12px; }
+  .if .kv { font: 12px var(--mono); color: var(--text); margin-top: 3px; }
+  .if .kv span { color: var(--muted); }
+
+  /* Alerts */
+  .alert { display: flex; gap: 10px; padding: 9px 12px; border-radius: 6px; margin-bottom: 8px; border: 1px solid var(--border); border-left-width: 4px; background: var(--bg); }
+  .alert.critical { border-left-color: var(--red); background: rgba(248,81,73,.08); }
+  .alert.warning { border-left-color: var(--amber); background: rgba(210,153,34,.08); }
+  .alert .sev { font: 700 10.5px var(--mono); text-transform: uppercase; padding-top: 2px; min-width: 62px; }
+  .alert.critical .sev { color: var(--red); }
+  .alert.warning .sev { color: var(--amber); }
+  .alert .msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .alert .dev { font: 12px var(--mono); color: var(--muted); }
+  .ok-box { padding: 12px; border: 1px solid rgba(63,185,80,.5); background: rgba(63,185,80,.08); color: #8ee69a; border-radius: 6px; }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  #faultLine { font: 12px var(--mono); color: var(--muted); margin-bottom: 12px; }
+  #faultLine b { color: var(--amber); }
+  #alertList { max-height: 360px; overflow: auto; }
+
+  /* Status */
+  .cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); }
+  @media (max-width: 520px) { .cards { grid-template-columns: minmax(0, 1fr); } }
+  .card { border: 1px solid var(--border); border-radius: 8px; background: var(--bg); overflow: hidden; min-width: 0; }
+  .card .ch { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--border); background: var(--panel-2); }
+  .card .ch b { font-family: var(--mono); font-size: 14px; }
+  .card .ch .up-time { margin-left: auto; font: 12px var(--mono); color: var(--muted); }
+  .role-tag { font: 700 10px var(--sans); text-transform: uppercase; letter-spacing: .8px; padding: 1px 6px; border-radius: 3px; border: 1px solid currentColor; }
+  table { border-collapse: collapse; width: 100%; }
+  th { text-align: left; font: 600 11px var(--sans); text-transform: uppercase; letter-spacing: .6px; color: var(--muted); padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  td { padding: 5px 10px; border-bottom: 1px solid #21262d; font: 12.5px var(--mono); vertical-align: middle; }
+  tr:last-child td { border-bottom: 0; }
+  td .desc { display: block; font: 11px var(--sans); color: var(--muted); }
+  td.if-name { white-space: nowrap; }
+  .st { display: inline-flex; align-items: center; gap: 6px; }
+  .util { display: flex; align-items: center; gap: 8px; min-width: 110px; }
+  .bar { flex: 1; height: 7px; background: #21262d; border-radius: 4px; overflow: hidden; min-width: 50px; }
+  .bar > span { display: block; height: 100%; background: var(--green); border-radius: 4px; }
+  .bar > span.amber { background: var(--amber); }
+  .bar > span.red { background: var(--red); }
+  .pct { width: 34px; text-align: right; }
+  .err0 { color: var(--muted); }
+  .err-n { color: var(--amber); font-weight: 700; }
+
+  /* Audit */
+  .chips { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+  .chip { border: 1px solid var(--border); border-radius: 6px; padding: 6px 14px; font: 600 13px var(--mono); background: var(--bg); }
+  .chip b { font-size: 18px; margin-right: 6px; }
+  .chip.HIGH { color: var(--red); border-color: rgba(248,81,73,.5); }
+  .chip.MEDIUM { color: var(--amber); border-color: rgba(210,153,34,.5); }
+  .chip.LOW { color: var(--blue); border-color: rgba(88,166,255,.5); }
+  .sev-head { font: 700 12px var(--mono); text-transform: uppercase; letter-spacing: 1px; margin: 16px 0 8px; }
+  .sev-head.HIGH { color: var(--red); } .sev-head.MEDIUM { color: var(--amber); } .sev-head.LOW { color: var(--blue); }
+  details.finding { border: 1px solid var(--border); border-left-width: 4px; border-radius: 6px; margin-bottom: 8px; background: var(--bg); }
+  details.finding.HIGH { border-left-color: var(--red); }
+  details.finding.MEDIUM { border-left-color: var(--amber); }
+  details.finding.LOW { border-left-color: var(--blue); }
+  details.finding > summary { cursor: pointer; padding: 9px 12px; display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; list-style: none; }
+  details.finding > summary::-webkit-details-marker { display: none; }
+  details.finding > summary::before { content: "▸"; color: var(--muted); }
+  details.finding[open] > summary::before { content: "▾"; }
+  .badge { font: 700 10.5px var(--mono); padding: 1px 7px; border-radius: 3px; text-transform: uppercase; }
+  .badge.HIGH { background: rgba(248,81,73,.18); color: var(--red); }
+  .badge.MEDIUM { background: rgba(210,153,34,.18); color: var(--amber); }
+  .badge.LOW { background: rgba(88,166,255,.18); color: var(--blue); }
+  .f-dev { font: 600 13px var(--mono); }
+  .f-rule { font: 13px var(--mono); color: var(--blue); }
+  .f-obj { font-size: 12px; color: var(--muted); margin-left: auto; font-family: var(--mono); }
+  .fbody { padding: 4px 14px 14px 36px; }
+  .fbody .lbl, .lbl { font: 700 10.5px var(--sans); text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 10px 0 3px; }
+  .fbody p { margin: 0; }
+  pre.fix {
+    margin: 0; padding: 10px 12px; background: #010409; border: 1px solid var(--border); border-radius: 6px;
+    font: 12.5px/1.5 var(--mono); color: #7ee787; overflow: auto; white-space: pre;
+  }
+
+  /* Troubleshoot */
+  .ts-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 12px; align-items: end; }
+  @media (max-width: 720px) { .ts-form { grid-template-columns: minmax(0, 1fr); } }
+  .ts-form label { display: block; font: 700 10.5px var(--sans); text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 4px; }
+  .examples { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0 4px; }
+  .examples .lbl { margin: 0 4px 0 0; }
+  .examples button { font: 12.5px var(--mono); }
+  #tsResult { margin-top: 16px; }
+  .ts-title { font: 13px var(--mono); color: var(--muted); margin-bottom: 10px; }
+  .trace { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .step { display: grid; grid-template-columns: 28px 74px 60px minmax(0, 1fr); gap: 4px 10px; padding: 9px 12px; border-bottom: 1px solid #21262d; border-left: 4px solid transparent; align-items: baseline; }
+  .step:last-child { border-bottom: 0; }
+  .step .i { font: 12px var(--mono); color: var(--muted); text-align: right; }
+  .step .txt { min-width: 0; }
+  .step .chk { font-weight: 600; }
+  .step .det { color: var(--muted); font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
+  .step.PASS { border-left-color: var(--green); }
+  .step.FAIL { border-left-color: var(--red); background: rgba(248,81,73,.12); }
+  .step.FAIL .det { color: #ffb3ad; }
+  .step.INFO { border-left-color: #4b5563; }
+  .layer { font: 700 11px var(--mono); text-align: center; padding: 2px 0; border-radius: 4px; background: #21262d; color: var(--text); }
+  .layer.L1 { background: rgba(240,136,62,.18); color: var(--orange); }
+  .layer.L2 { background: rgba(163,113,247,.18); color: var(--purple); }
+  .layer.L3 { background: rgba(88,166,255,.18); color: var(--blue); }
+  .layer.L4ACL { background: rgba(210,153,34,.18); color: var(--amber); }
+  .layer.RESOLVE { background: #21262d; color: var(--muted); }
+  .pill { font: 700 11px var(--mono); text-align: center; padding: 2px 0; border-radius: 4px; letter-spacing: .5px; }
+  .pill.PASS { background: rgba(63,185,80,.2); color: var(--green); }
+  .pill.FAIL { background: var(--red); color: #fff; }
+  .pill.INFO { background: #21262d; color: var(--muted); }
+  .root { margin-top: 16px; border: 1px solid var(--red); background: rgba(248,81,73,.1); border-radius: 8px; padding: 14px 16px; }
+  .root.healthy { border-color: var(--green); background: rgba(63,185,80,.08); }
+  .root.warn { border-color: var(--amber); background: rgba(210,153,34,.1); }
+  .root .rh { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .root .rh .t { font: 700 12px var(--sans); text-transform: uppercase; letter-spacing: .9px; color: var(--red); }
+  .root.healthy .rh .t { color: var(--green); }
+  .root.warn .rh .t { color: var(--amber); }
+  .root .where { font: 12.5px var(--mono); color: var(--muted); }
+  .root .sum { font-size: 15px; margin-bottom: 12px; }
+  .conf { font: 700 10.5px var(--mono); text-transform: uppercase; padding: 1px 7px; border-radius: 3px; background: #21262d; color: var(--muted); }
+  .err-box { border: 1px solid var(--red); background: rgba(248,81,73,.1); border-radius: 6px; padding: 10px 14px; color: #ffb3ad; }
+  .loading { color: var(--muted); font-family: var(--mono); }
+  .empty { color: var(--muted); padding: 8px 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span class="accent">&gt;_</span> Mini-NMS — Network Operations</h1>
+  <div id="health"><span class="dot"></span>connecting…</div>
+  <div class="sim-note">simulated network — derived from device configs</div>
+</header>
+<div id="banner" class="banner" hidden>Cannot reach API — is api.py running on localhost:8080?</div>
+
+<main>
+  <div class="grid-top">
+    <section class="panel">
+      <div class="ph"><h2>Topology</h2><span class="right">click a device for its interfaces</span></div>
+      <div class="topo-wrap">
+        <div>
+          <svg id="topoSvg" viewBox="0 0 900 400" role="img" aria-label="Network topology"></svg>
+          <div class="legend">
+            <span><i style="background:var(--orange)"></i>firewall</span>
+            <span><i style="background:var(--blue)"></i>router</span>
+            <span><i style="background:var(--purple)"></i>switch</span>
+            <span><i style="background:var(--red)"></i>link down / overlap</span>
+            <span><i style="background:var(--amber)"></i>flapping</span>
+          </div>
+        </div>
+        <div class="detail" id="detail"><div class="empty">Select a device to see its interfaces.</div></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="ph"><h2>Live Alerts</h2><span class="right" id="alertCount"></span></div>
+      <div class="pb">
+        <div class="btn-row">
+          <button class="danger" id="btnInject">Inject: core link down</button>
+          <button id="btnClear">Clear faults</button>
+        </div>
+        <div class="muted" style="font-size:11.5px;margin:-6px 0 10px">Demo uses shared in-memory state — injected faults are visible to all viewers and reset on restart.</div>
+        <div id="faultLine"></div>
+        <div id="alertList"><div class="loading">loading…</div></div>
+      </div>
+    </section>
+  </div>
+
+  <section class="panel hero">
+    <div class="ph"><h2>Troubleshoot</h2><span class="right">bottom-up walk: L1 → L2 → L3 → ACL, stops at first fault</span></div>
+    <div class="pb">
+      <form id="tsForm" class="ts-form" autocomplete="off">
+        <div><label for="tsSrc">Source</label><input type="text" id="tsSrc" placeholder="SERVER-APP-1"></div>
+        <div><label for="tsDst">Destination</label><input type="text" id="tsDst" placeholder="gateway"></div>
+        <button type="submit" class="primary" id="tsGo">Diagnose</button>
+      </form>
+      <div class="examples">
+        <span class="lbl">Examples</span>
+        <button type="button" data-src="SERVER-APP-1" data-dst="gateway">SERVER-APP-1 → gateway</button>
+        <button type="button" data-src="SERVER-DB-1" data-dst="gateway">SERVER-DB-1 → gateway</button>
+        <button type="button" data-src="USER-PC-4" data-dst="10.20.20.10">USER-PC-4 → 10.20.20.10</button>
+      </div>
+      <div class="muted" style="font-size:12px">Source/destination can be a host description, an IP, <code>device:interface</code>, or <code>gateway</code>.</div>
+      <div id="tsResult"></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="ph"><h2>Live Status</h2><span class="right" id="statusStamp"></span></div>
+    <div class="pb"><div class="cards" id="cards"><div class="loading">loading…</div></div></div>
+  </section>
+
+  <section class="panel">
+    <div class="ph"><h2>Config Audit</h2><button id="btnAudit" style="margin-left:auto">Re-run audit</button></div>
+    <div class="pb" id="auditBody"><div class="loading">loading…</div></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+const API = "";  // same origin: the API and this page are served by the same server
+const POLL_MS = 5000;
+const ROLE_COLOR = { firewall: "var(--orange)", router: "var(--blue)", switch: "var(--purple)" };
+
+let topo = null, status = null, alerts = null, audit = null;
+let selected = null;
+let polling = false;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+/* ---------- API ---------- */
+
+function setApiDown(down) { $("banner").hidden = !down; }
+
+async function api(path, body) {
+  let res;
+  try {
+    res = await fetch(API + path, body === undefined ? {} : {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+  } catch (e) {
+    setApiDown(true);            // network-level failure: server unreachable
+    throw e;
+  }
+  setApiDown(false);
+  let data = null;
+  try { data = await res.json(); } catch (_) { /* non-JSON body */ }
+  if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
+  return data;
+}
+
+/* ---------- Header / health ---------- */
+
+async function refreshHealth() {
+  try {
+    const h = await api("/api/health");
+    $("health").innerHTML = `<span class="dot up"></span>API ok · ${esc(h.devices)} devices`;
+  } catch (_) {
+    $("health").innerHTML = `<span class="dot down"></span>API offline`;
+  }
+}
+
+/* ---------- Topology ---------- */
+
+const isLogical = key => { const n = key.split(":")[1] || ""; return /^vlan/i.test(n) || n.includes(".") || /^loopback/i.test(n); };
+
+function linkState(link) {
+  if (!status) return "up";
+  let keys = link.endpoints.flat().filter(Boolean);
+  const physical = keys.filter(k => !isLogical(k));
+  if (physical.length) keys = physical;
+  let worst = "up";
+  for (const k of keys) {
+    const i = status.interfaces[k];
+    if (!i) continue;
+    if (i.oper_status === "down" || i.link_status === "down") return "down";
+    if (i.link_status === "flapping") worst = "flap";
+  }
+  return worst;
+}
+
+function layout(devices) {
+  const W = 900, rows = { firewall: 70, router: 200 }, lower = 330;
+  const groups = {};
+  for (const d of devices) (groups[d.role in rows ? d.role : "switch"] ||= []).push(d);
+  const pos = {};
+  for (const [role, list] of Object.entries(groups)) {
+    list.sort((a, b) => a.hostname.localeCompare(b.hostname));
+    list.forEach((d, i) => { pos[d.hostname] = { x: W * (i + 1) / (list.length + 1), y: rows[role] ?? lower }; });
+  }
+  return pos;
+}
+
+function drawTopology() {
+  if (!topo) return;
+  const pos = layout(topo.devices);
+  const BW = 132, BH = 56;
+  const mid = (a, b) => ({ x: (pos[a].x + pos[b].x) / 2, y: (pos[a].y + pos[b].y) / 2 });
+  let svg = "";
+
+  for (const link of topo.links) {
+    const [a, b] = link.devices;
+    if (!a || !b || !pos[a] || !pos[b]) continue;
+    const m = mid(a, b), st = linkState(link);
+    svg += `<line class="lnk ${st === "up" ? "" : st}" x1="${pos[a].x}" y1="${pos[a].y}" x2="${pos[b].x}" y2="${pos[b].y}"/>`;
+    svg += `<text class="lnk-label" x="${m.x}" y="${m.y + 4}">${esc(link.network || link.methods.join("+"))}</text>`;
+  }
+
+  for (const c of topo.conflicts) {
+    const devs = [...new Set(c.interfaces.map(k => k.split(":")[0]))];
+    if (devs.length !== 2 || !pos[devs[0]] || !pos[devs[1]]) continue;
+    const [a, b] = devs, m = mid(a, b);
+    svg += `<line class="ovl" x1="${pos[a].x}" y1="${pos[a].y}" x2="${pos[b].x}" y2="${pos[b].y}"/>`;
+    svg += `<text class="ovl-label" x="${m.x}" y="${m.y - 4}">OVERLAP</text>`;
+    svg += `<text class="lnk-label" x="${m.x}" y="${m.y + 10}" style="fill:var(--red)">${esc(c.network)}</text>`;
+  }
+
+  for (const d of topo.devices) {
+    const p = pos[d.hostname], color = ROLE_COLOR[d.role] || "var(--muted)";
+    const dev = status && status.devices[d.hostname];
+    const dot = dev ? (dev.status === "up" ? "var(--green)" : "var(--red)") : "var(--muted)";
+    svg += `<g class="node ${selected === d.hostname ? "sel" : ""}" data-h="${esc(d.hostname)}">
+      <rect class="box" x="${p.x - BW / 2}" y="${p.y - BH / 2}" width="${BW}" height="${BH}" rx="8" style="stroke:${color}"/>
+      <text class="host" x="${p.x}" y="${p.y - 2}" text-anchor="middle">${esc(d.hostname)}</text>
+      <text class="role" x="${p.x}" y="${p.y + 15}" text-anchor="middle">${esc(d.role)}</text>
+      <circle cx="${p.x + BW / 2 - 12}" cy="${p.y - BH / 2 + 12}" r="4.5" style="fill:${dot}"/>
+    </g>`;
+  }
+  $("topoSvg").innerHTML = svg;
+}
+
+function drawDetail() {
+  const el = $("detail");
+  const d = topo && topo.devices.find(x => x.hostname === selected);
+  if (!d) { el.innerHTML = `<div class="empty">Select a device to see its interfaces.</div>`; return; }
+  const items = d.interfaces.map(i => {
+    const live = status && status.interfaces[`${d.hostname}:${i.name}`];
+    const dot = live ? `<span class="dot ${live.oper_status === "up" ? "up" : "down"}" title="oper ${esc(live.oper_status)}"></span>` : `<span class="dot"></span>`;
+    const kv = [];
+    if (i.ip) kv.push(`<span>ip</span> ${esc(i.ip)} / ${esc(i.mask)}`);
+    if (i.vlan != null) kv.push(`<span>vlan</span> ${esc(i.vlan)}`);
+    const sw = i.switchport;
+    if (sw) {
+      if (sw.mode) kv.push(`<span>mode</span> ${esc(sw.mode)}`);
+      if (sw.access_vlan != null) kv.push(`<span>access vlan</span> ${esc(sw.access_vlan)}`);
+      if (sw.trunk_allowed) kv.push(`<span>trunk allowed</span> ${esc(sw.trunk_allowed.join(","))}`);
+    }
+    if (i.shutdown) kv.push(`<span style="color:var(--red)">shutdown (config)</span>`);
+    return `<div class="if"><div class="n">${dot}${esc(i.name)}</div>
+      ${i.description ? `<div class="d">${esc(i.description)}</div>` : ""}
+      ${kv.map(x => `<div class="kv">${x}</div>`).join("")}</div>`;
+  }).join("");
+  const conflicts = topo.conflicts.filter(c => c.interfaces.some(k => k.startsWith(d.hostname + ":")));
+  const warn = conflicts.map(c => `<div class="err-box" style="margin-bottom:10px;font-size:12px">Subnet overlap ${esc(c.network)}:<br>${c.interfaces.map(esc).join("<br>")}</div>`).join("");
+  el.innerHTML = `<h3>${esc(d.hostname)}</h3><div class="sub" style="color:${ROLE_COLOR[d.role] || "var(--muted)"}">${esc(d.role)} · ${d.interfaces.length} interfaces</div>${warn}${items}`;
+}
+
+$("topoSvg").addEventListener("click", ev => {
+  const g = ev.target.closest(".node");
+  if (!g) return;
+  selected = g.dataset.h;
+  drawTopology();
+  drawDetail();
+});
+
+async function loadTopology() {
+  topo = await api("/api/topology");
+  drawTopology();
+  drawDetail();
+}
+
+/* ---------- Status ---------- */
+
+function utilClass(p) { return p > 90 ? "red" : p > 75 ? "amber" : ""; }
+
+function linkCell(s) {
+  const cls = s === "up" ? "up" : s === "flapping" ? "flap" : "down";
+  return `<span class="st"><span class="dot ${cls}"></span>${esc(s)}</span>`;
+}
+
+function drawStatus() {
+  if (!status) return;
+  const roles = {};
+  if (topo) for (const d of topo.devices) roles[d.hostname] = d.role;
+  $("cards").innerHTML = Object.entries(status.devices).map(([host, dev]) => {
+    const rows = dev.interfaces.map(k => {
+      const i = status.interfaces[k];
+      return `<tr>
+        <td class="if-name">${esc(i.name)}${i.description ? `<span class="desc">${esc(i.description)}</span>` : ""}</td>
+        <td><span class="st"><span class="dot ${i.oper_status === "up" ? "up" : "down"}"></span>${esc(i.oper_status)}</span></td>
+        <td>${linkCell(i.link_status)}</td>
+        <td><div class="util"><div class="bar"><span class="${utilClass(i.utilization_pct)}" style="width:${Math.min(100, i.utilization_pct)}%"></span></div><span class="pct">${esc(i.utilization_pct)}%</span></div></td>
+        <td class="${i.errors ? "err-n" : "err0"}">${esc(i.errors)}</td>
+      </tr>`;
+    }).join("");
+    const role = roles[host];
+    const tag = role ? `<span class="role-tag" style="color:${ROLE_COLOR[role] || "var(--muted)"}">${esc(role)}</span>` : "";
+    return `<div class="card">
+      <div class="ch"><span class="dot ${dev.status === "up" ? "up" : "down"}"></span><b>${esc(host)}</b>${tag}<span class="up-time">up ${esc(dev.uptime)}</span></div>
+      <table><thead><tr><th>Interface</th><th>Oper</th><th>Link</th><th>Util</th><th>Err</th></tr></thead><tbody>${rows}</tbody></table>
+    </div>`;
+  }).join("");
+  $("statusStamp").textContent = `refreshes every ${POLL_MS / 1000}s · updated ${new Date().toLocaleTimeString()}`;
+  drawFaultLine();
+}
+
+function drawFaultLine() {
+  const f = status && status.faults || [];
+  $("faultLine").innerHTML = f.length ? `Injected faults: <b>${f.map(esc).join(" · ")}</b>` : `No injected faults — showing config baseline.`;
+}
+
+async function refreshStatus() {
+  status = await api("/api/status");
+  drawStatus();
+  drawTopology();   // link colors depend on live state
+  drawDetail();
+}
+
+/* ---------- Alerts ---------- */
+
+function drawAlerts(list) {
+  alerts = list;
+  const crit = list.filter(a => a.severity === "critical").length;
+  $("alertCount").textContent = list.length ? `${crit} critical · ${list.length - crit} warning` : "";
+  $("alertList").innerHTML = list.length ? list.map(a => `
+    <div class="alert ${esc(a.severity)}">
+      <div class="sev">${esc(a.severity)}</div>
+      <div class="msg">${esc(a.message)}<div class="dev">${esc(a.object)}</div></div>
+    </div>`).join("") : `<div class="ok-box">No active alerts.</div>`;
+}
+
+async function refreshAlerts() { drawAlerts(await api("/api/alerts")); }
+
+async function inject(payload, btn) {
+  btn.disabled = true;
+  try {
+    const res = await api("/api/inject", payload);
+    drawAlerts(res.alerts);            // effect is visible immediately
+    await refreshStatus();
+  } catch (e) {
+    $("alertList").innerHTML = `<div class="err-box">Inject failed: ${esc(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$("btnInject").addEventListener("click", ev => inject({ fault: "interface_down", target: "r1:GigabitEthernet0/0" }, ev.currentTarget));
+$("btnClear").addEventListener("click", ev => inject({ fault: "clear" }, ev.currentTarget));
+
+/* ---------- Audit ---------- */
+
+function drawAudit() {
+  if (!audit) return;
+  const sevs = ["HIGH", "MEDIUM", "LOW"];
+  const by = Object.fromEntries(sevs.map(s => [s, audit.filter(f => f.severity === s)]));
+  let html = `<div class="chips">${sevs.map(s => `<div class="chip ${s}"><b>${by[s].length}</b>${s}</div>`).join("")}
+    <div class="chip"><b>${audit.length}</b>TOTAL</div></div>`;
+  if (!audit.length) html += `<div class="ok-box">No findings.</div>`;
+  for (const s of sevs) {
+    if (!by[s].length) continue;
+    html += `<div class="sev-head ${s}">${s} (${by[s].length})</div>`;
+    html += by[s].map(f => `<details class="finding ${s}">
+      <summary><span class="badge ${s}">${s}</span><span class="f-dev">${esc(f.device)}</span><span class="f-rule">${esc(f.rule)}</span>
+        <span class="muted" style="font-size:12px">${esc(f.category)}</span><span class="f-obj">${esc(f.object)}</span></summary>
+      <div class="fbody">
+        <div class="lbl">Finding</div><p>${esc(f.finding)}</p>
+        <div class="lbl">Why it matters</div><p>${esc(f.why)}</p>
+        <div class="lbl">Fix</div><pre class="fix">${esc(f.fix)}</pre>
+      </div></details>`).join("");
+  }
+  $("auditBody").innerHTML = html;
+}
+
+async function loadAudit() {
+  $("btnAudit").disabled = true;
+  try { audit = await api("/api/audit"); drawAudit(); }
+  catch (e) { $("auditBody").innerHTML = `<div class="err-box">Could not load audit: ${esc(e.message)}</div>`; }
+  finally { $("btnAudit").disabled = false; }
+}
+$("btnAudit").addEventListener("click", loadAudit);
+
+/* ---------- Troubleshoot ---------- */
+
+const layerClass = l => String(l).replace(/\W/g, "");
+
+function renderDiagnosis(d) {
+  const s = d.symptom || {};
+  let html = `<div class="ts-title">${esc(s.source)} → ${esc(s.dest)}</div><div class="trace">`;
+  html += d.trace.map((t, n) => `<div class="step ${esc(t.result)}">
+      <div class="i">${n + 1}</div>
+      <div class="layer ${layerClass(t.layer)}">${esc(t.layer)}</div>
+      <div class="pill ${esc(t.result)}">${esc(t.result)}</div>
+      <div class="txt"><div class="chk">${esc(t.check)}</div><div class="det">${esc(t.detail)}</div></div>
+    </div>`).join("");
+  html += `</div>`;
+
+  const rc = d.root_cause;
+  if (rc) {
+    html += `<div class="root">
+      <div class="rh"><span class="t">Root cause · ${esc(rc.layer)}</span><span class="where">${esc(rc.device)} — ${esc(rc.object)}</span>
+        <span class="conf">confidence: ${esc(d.confidence)}</span></div>
+      <div class="sum">${esc(d.summary || rc.summary)}</div>
+      <div class="lbl">Fix</div><pre class="fix">${esc(d.fix)}</pre></div>`;
+  } else {
+    const failed = d.trace.some(t => t.result === "FAIL");
+    html += `<div class="root ${failed ? "warn" : "healthy"}">
+      <div class="rh"><span class="t">${failed ? "Could not diagnose" : "No fault found"}</span></div>
+      <div class="sum">${esc(d.summary)}</div></div>`;
+  }
+  return html;
+}
+
+async function diagnose(source, dest) {
+  const out = $("tsResult"), go = $("tsGo");
+  if (!source.trim() || !dest.trim()) { out.innerHTML = `<div class="err-box">Enter both a source and a destination.</div>`; return; }
+  go.disabled = true;
+  out.innerHTML = `<div class="loading">Diagnosing…</div>`;
+  try {
+    const d = await api("/api/troubleshoot", { type: "no_connectivity", source: source.trim(), dest: dest.trim() });
+    out.innerHTML = renderDiagnosis(d);
+  } catch (e) {
+    out.innerHTML = `<div class="err-box">Diagnosis failed: ${esc(e.message)}</div>`;
+  } finally {
+    go.disabled = false;
+  }
+}
+
+$("tsForm").addEventListener("submit", ev => { ev.preventDefault(); diagnose($("tsSrc").value, $("tsDst").value); });
+document.querySelectorAll(".examples button").forEach(b => b.addEventListener("click", () => {
+  $("tsSrc").value = b.dataset.src;
+  $("tsDst").value = b.dataset.dst;
+  diagnose(b.dataset.src, b.dataset.dst);
+}));
+
+/* ---------- Boot + polling ---------- */
+
+async function poll() {
+  if (polling) return;
+  polling = true;
+  try {
+    await refreshHealth();
+    // Static data is fetched lazily so a late-starting API still fills the page.
+    if (!topo) await loadTopology().catch(() => {});
+    if (!audit) await loadAudit();
+    await Promise.all([refreshStatus(), refreshAlerts()]);
+  } catch (_) {
+    /* banner already shown by api() for network failures */
+  } finally {
+    polling = false;
+  }
+}
+
+poll();
+setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>
