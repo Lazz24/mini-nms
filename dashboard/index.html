@@ -221,6 +221,21 @@
   .err-box { border: 1px solid var(--red); background: rgba(248,81,73,.1); border-radius: 6px; padding: 10px 14px; color: #ffb3ad; }
   .loading { color: var(--muted); font-family: var(--mono); }
   .empty { color: var(--muted); padding: 8px 0; }
+
+  /* Help */
+  details.help > summary { cursor: pointer; padding: 12px 16px; display: flex; align-items: center; gap: 10px; list-style: none; }
+  details.help > summary::-webkit-details-marker { display: none; }
+  details.help > summary::before { content: "▸"; color: var(--muted); }
+  details.help[open] > summary::before { content: "▾"; }
+  details.help > summary h2 { margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+  details.help > summary .hint { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+  details.help[open] > summary { border-bottom: 1px solid var(--border); }
+  .help-body { padding: 4px 16px 16px; display: grid; gap: 4px 32px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+  .help-body h3 { margin: 14px 0 6px; font: 700 11px var(--sans); text-transform: uppercase; letter-spacing: .9px; color: var(--blue); }
+  .help-body p, .help-body ul { margin: 0; }
+  .help-body ul { padding-left: 18px; }
+  .help-body li { margin-bottom: 4px; }
+  .help-body code { font-size: 12.5px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; }
 </style>
 </head>
 <body>
@@ -233,6 +248,39 @@
 <div id="banner" class="banner" hidden>Cannot reach API — is api.py running on localhost:8080?</div>
 
 <main>
+  <details class="panel help" id="help">
+    <summary><h2>Help / What can I do?</h2><span class="hint">click to expand</span></summary>
+    <div class="help-body">
+      <div>
+        <h3>What this is</h3>
+        <p>Mini-NMS is a network operations tool running against a fixed simulated network of 5 Cisco devices. It reads their real IOS configurations to audit them, monitor live state, and troubleshoot connectivity faults. You're exploring a built-in sample network — you can't upload your own configs here.</p>
+
+        <h3>The network</h3>
+        <ul>
+          <li><b>Routers:</b> <code>r1</code>, <code>r2</code> (OSPF core)</li>
+          <li><b>Switches:</b> <code>sw1</code>, <code>sw2</code> (VLAN 10 = users, VLAN 20 = servers)</li>
+          <li><b>Firewall:</b> <code>fw1</code> (edge)</li>
+          <li><b>Hosts you can reference:</b> <code>USER-PC-1</code>, <code>USER-PC-2</code>, <code>USER-PC-3</code>, <code>SERVER-APP-1</code> (on sw1); <code>USER-PC-4</code>, <code>SERVER-APP-2</code>, <code>SERVER-DB-1</code> (on sw2)</li>
+        </ul>
+      </div>
+      <div>
+        <h3>What you can do</h3>
+        <ul>
+          <li><b>Audit</b> — scroll to Config Audit to see security, correctness, and drift findings, each with a fix. (Already computed — nothing to click.)</li>
+          <li><b>Monitor</b> — Live Status shows each interface; use "Inject: core link down" then "Clear faults" to see the network react.</li>
+          <li><b>Troubleshoot</b> — enter a source and destination and click Diagnose. Source/dest can be a host name (e.g. <code>SERVER-APP-1</code>), an IP (e.g. <code>10.10.10.50</code>), a device:interface (e.g. <code>r1:GigabitEthernet0/0</code>), or the word <code>gateway</code>. The tool walks the network layer by layer to the root cause.</li>
+        </ul>
+
+        <h3>Try these</h3>
+        <ul>
+          <li><code>SERVER-APP-1</code> → <code>gateway</code> — a VLAN misconfiguration (server cut off at the trunk)</li>
+          <li><code>SERVER-DB-1</code> → <code>gateway</code> — a shut-down switch port</li>
+          <li><code>USER-PC-4</code> → <code>10.20.20.10</code> — a subnet overlap between two devices</li>
+        </ul>
+      </div>
+    </div>
+  </details>
+
   <div class="grid-top">
     <section class="panel">
       <div class="ph"><h2>Topology</h2><span class="right">click a device for its interfaces</span></div>
